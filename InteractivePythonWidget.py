@@ -5,10 +5,9 @@ __all__ = [
 from Manifest import QtCore, QtGui, \
 	code, sys, traceback, rlcompleter, os, enum, \
 	logging
-import Drawing
+import Drawing, Settings
 
 log = logging.getLogger('InteractivePythonWidget')
-log.setLevel(logging.DEBUG)
 
 
 
@@ -19,6 +18,10 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 	"""
 	TAB_WIDTH = 4
 	TB_HEADER = 'Traceback (most recent call last):'
+	STYLE = enum.Enum('OUTPUT', 'CONTEXT', 'ERROR')
+	SETTINGS_GROUP_NAME = 'InteractivePythonWidget'
+	SETTINGS_NAME_SPLITTER = 'splitter'
+	SETTINGS_NAME_GEOMETRY = 'windowGeometry'
 	def __init__(self, parent=None, locals={}):
 		QtGui.QWidget.__init__(self, parent)
 
@@ -41,20 +44,20 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 		layout.setMargin(QtGui.QApplication.style()
 			.pixelMetric(QtGui.QStyle.PM_SplitterWidth))
 
-		splitter = QtGui.QSplitter(QtCore.Qt.Vertical, self)
-		layout.addWidget(splitter)
+		self.__splitter = QtGui.QSplitter(QtCore.Qt.Vertical, self)
+		layout.addWidget(self.__splitter)
 
 		tabWidth = self.TAB_WIDTH*self.fontMetrics().averageCharWidth()
-		self.__outputField = QtGui.QTextEdit(splitter)
+		self.__outputField = QtGui.QTextEdit(self.__splitter)
 		self.__outputField.setReadOnly(True)
 		self.__outputField.setTabStopWidth(tabWidth)
-		splitter.addWidget(self.__outputField)
+		self.__splitter.addWidget(self.__outputField)
 
 		self.__inputField = PythonInputWidget(self, locals)
 		self.__inputField.setAcceptRichText(False)
 		self.__inputField.setTabChangesFocus(False)
 		self.__inputField.setTabStopWidth(tabWidth)
-		splitter.addWidget(self.__inputField)
+		self.__splitter.addWidget(self.__inputField)
 
 		QtCore.QObject.connect(self.__inputField,
 			QtCore.SIGNAL('execute'), self.__execute)
@@ -155,7 +158,6 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 			self.STYLE.CONTEXT)
 
 
-	STYLE = enum.Enum('OUTPUT', 'CONTEXT', 'ERROR')
 	def __appendOutputText(self, text, style):
 
 		format = QtGui.QTextCharFormat()
@@ -170,6 +172,26 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 
 		self.__outputField.moveCursor(QtGui.QTextCursor.End)
 		self.__outputField.textCursor().insertText(text, format)
+
+
+	def writeSettings(self, settings):
+		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+			Settings.WriteWidgetGeometry(settings,
+				self.SETTINGS_NAME_GEOMETRY, self)
+			settings.setValue(self.SETTINGS_NAME_SPLITTER,
+				QtCore.QVariant(self.__splitter.saveState()))
+			self.__inputField.writeSettings(settings)
+
+
+	def readSettings(self, settings):
+		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+			Settings.ReadWidgetGeometry(settings,
+				self.SETTINGS_NAME_GEOMETRY, self)
+			splitterSettings = settings.value(
+				self.SETTINGS_NAME_SPLITTER).toByteArray()
+			if not splitterSettings.isNull():
+				self.__splitter.restoreState(splitterSettings)
+			self.__inputField.readSettings(settings)
 
 
 
@@ -205,6 +227,10 @@ class PythonInputWidget(QtGui.QTextEdit):
 		execute		text (Python code to execute)
 		completions	list of possible completions
 	"""
+	SETTINGS_GROUP_NAME = 'PythonInputWidget'
+	SETTINGS_NAME_HISTORY = 'history'
+	SETTINGS_NAME_HISTORY_ENTRY = 'entry'
+	MAX_SAVED_HISTORY = 1023
 	def __init__(self, parent, locals):
 		QtGui.QTextEdit.__init__(self, parent)
 		self.__commandHistory = []
@@ -404,6 +430,39 @@ class PythonInputWidget(QtGui.QTextEdit):
 			self.setPlainText(self.__commandHistory[i])
 			self.__commandHistoryIndex = i
 		self.moveCursor(QtGui.QTextCursor.End)
+
+
+	def readSettings(self, settings):
+		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+			with Settings.ArrayReadGuard(settings,
+			self.SETTINGS_NAME_HISTORY) as n:
+				for i in xrange(n):
+					self.__readHistorySetting(settings, i)
+
+
+	def __readHistorySetting(self, settings, i):
+		settings.setArrayIndex(i)
+		qv = settings.value(self.SETTINGS_NAME_HISTORY_ENTRY)
+		qstr = qv.toString()
+		if not qstr.isNull():
+			self.__commandHistory.append(str(qstr))
+
+
+	def writeSettings(self, settings):
+		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+			with Settings.ArrayWriteGuard(settings,
+			self.SETTINGS_NAME_HISTORY):
+				history = self.__commandHistory[
+					-self.MAX_SAVED_HISTORY:]
+				for i, h in enumerate(history):
+					self.__writeHistorySetting(
+						settings, i, h)
+
+
+	def __writeHistorySetting(self, settings, i, historyEntry):
+		settings.setArrayIndex(i)
+		settings.setValue(self.SETTINGS_NAME_HISTORY_ENTRY,
+			QtCore.QVariant(QtCore.QVariant(historyEntry)))
 
 
 
