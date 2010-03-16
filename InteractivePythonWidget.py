@@ -348,7 +348,8 @@ class PythonInputWidget(QtGui.QTextEdit):
 
 
 	def __isPythonIdentifier(self, qChar):
-		return qChar.isLetterOrNumber() or qChar.toAscii() == '.'
+		return qChar.isLetterOrNumber() \
+			or qChar.toAscii() in ('.', '_')
 
 
 	def __autoComplete(self):
