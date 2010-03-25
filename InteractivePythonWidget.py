@@ -293,9 +293,14 @@ class PythonInputWidget(QtGui.QTextEdit):
 
 		if self.textCursor().position() == oldPos:
 			if event.key() == QtCore.Qt.Key_Up:
-				self.moveCursor(QtGui.QTextCursor.StartOfLine)
+				args = [QtGui.QTextCursor.StartOfLine,]
 			else:
-				self.moveCursor(QtGui.QTextCursor.EndOfLine)
+				args = [QtGui.QTextCursor.EndOfLine,]
+
+			if event.modifiers() & QtCore.Qt.ShiftModifier:
+				args.append(QtGui.QTextCursor.KeepAnchor)
+
+			self.moveCursor(*args)
 
 
 	def __clearCurrentLineOrDocument(self):
@@ -319,7 +324,9 @@ class PythonInputWidget(QtGui.QTextEdit):
 		if not self.textCursor().hasSelection():
 			self.clear()
 
-		self.__commandHistory.append(allText)
+		if not (self.__commandHistory
+		and self.__commandHistory[-1] == allText):
+			self.__commandHistory.append(allText)
 		self.__commandHistoryIndex = None
 
 
@@ -357,21 +364,27 @@ class PythonInputWidget(QtGui.QTextEdit):
 		cursor = QtGui.QTextCursor(doc)
 		cursor.setPosition(self.textCursor().position())
 
-		leftPos = rightPos = cursor.position()-1
-		c = doc.characterAt(rightPos)
+		startPos = leftPos = rightPos = cursor.position()-1
+		p = rightPos
+		c = doc.characterAt(p)
 		while self.__isPythonIdentifier(c):
-			rightPos += 1
-			cursor.movePosition(QtGui.QTextCursor.NextCharacter)
-			c = doc.characterAt(rightPos)
-		rightPos += 1
-		c = doc.characterAt(leftPos)
+			rightPos = p
+			p += 1
+			c = doc.characterAt(p)
+		rightPos -= 1
+		cursor.movePosition(QtGui.QTextCursor.NextCharacter,
+			QtGui.QTextCursor.MoveAnchor, (rightPos-startPos))
+
+		p = leftPos
+		c = doc.characterAt(p)
 		while self.__isPythonIdentifier(c):
-			leftPos -= 1
-			c = doc.characterAt(leftPos)
-		leftPos += 1
+			leftPos = p
+			p -= 1
+			c = doc.characterAt(p)
+		leftPos -= 2
 
 		cursor.movePosition(QtGui.QTextCursor.PreviousCharacter,
-			QtGui.QTextCursor.KeepAnchor, (rightPos-leftPos) - 1)
+			QtGui.QTextCursor.KeepAnchor, (rightPos-leftPos))
 
 		text = self.__getPlainText(cursor=cursor, selectionOnly=True)
 
