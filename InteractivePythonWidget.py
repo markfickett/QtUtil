@@ -8,6 +8,7 @@ from Manifest import QtCore, QtGui, \
 import Drawing, Settings
 
 log = logging.getLogger('InteractivePythonWidget')
+log.setLevel(logging.DEBUG)
 
 
 
@@ -18,10 +19,13 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 	"""
 	TAB_WIDTH = 4
 	TB_HEADER = 'Traceback (most recent call last):'
-	STYLE = enum.Enum('OUTPUT', 'CONTEXT', 'ERROR')
-	SETTINGS_GROUP_NAME = 'InteractivePythonWidget'
-	SETTINGS_NAME_SPLITTER = 'splitter'
-	SETTINGS_NAME_GEOMETRY = 'windowGeometry'
+	__STYLE = enum.Enum('OUTPUT', 'CONTEXT', 'ERROR')
+	__SETTINGS_GROUP_NAME = 'InteractivePythonWidget'
+	__SETTINGS_NAME_SPLITTER = 'splitter'
+	__SETTINGS_NAME_GEOMETRY = 'windowGeometry'
+
+	__OUTPUT_FORMATS = None
+
 	def __init__(self, parent=None, locals={}):
 		QtGui.QWidget.__init__(self, parent)
 
@@ -38,6 +42,8 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 		f.setFamily('Monaco')
 		f.setPointSize(10)
 		self.setFont(f)
+
+		self.__initFormats()
 
 		layout = QtGui.QVBoxLayout(self)
 		layout.setSpacing(0)
@@ -65,6 +71,25 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 			QtCore.SIGNAL('completions'), self.__showCompletions)
 
 
+	def __initFormats(self):
+		if self.__OUTPUT_FORMATS is not None:
+			return
+		self.__OUTPUT_FORMATS = {}
+		for style in self.__STYLE:
+			format = QtGui.QTextCharFormat()
+			if style == self.__STYLE.OUTPUT:
+				color = self.palette().color(
+					QtGui.QPalette.Text)
+			elif style == self.__STYLE.CONTEXT:
+				color = self.palette().color(
+					QtGui.QPalette.Disabled,
+					QtGui.QPalette.Text)
+			elif style == self.__STYLE.ERROR:
+				color = Drawing.GetErrorColor()
+			format.setForeground(QtGui.QBrush(color))
+			self.__OUTPUT_FORMATS[style] = format
+
+
 	def __execute(self, sourceText):
 		with self.__errRedirect:
 			with self.__outRedirect:
@@ -84,7 +109,7 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 			else:
 				prompt = sys.ps1
 			self.__appendOutputText('%s%s\n' % (prompt,  line),
-				self.STYLE.CONTEXT)
+				self.__STYLE.CONTEXT)
 
 			buffer += '\n' + line
 			if not self.runsource(buffer):
@@ -98,13 +123,13 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 			if self.runsource(buffer):
 				self.__errorOccurred = True
 				self.__appendOutputText('Input incomplete.',
-					self.STYLE.ERROR)
+					self.__STYLE.ERROR)
 
 
 	def write(self, outputText):
 		"""Undifferentiated writing (not used)."""
 		self.__appendOutputText('unexpected write: ' + outputText,
-			self.STYLE.ERROR)
+			self.__STYLE.ERROR)
 
 
 	def __showInputError(self):
@@ -116,7 +141,7 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 			excClass, excObj)
 		for formattedExcLine in formattedExcList:
 			self.__appendOutputText(formattedExcLine,
-				self.STYLE.ERROR)
+				self.__STYLE.ERROR)
 
 
 	def showsyntaxerror(self, filename=None):
@@ -135,60 +160,83 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 		formattedExcList = traceback.format_exception_only(
 			excClass, excObj)
 
-		self.__appendOutputText(self.TB_HEADER, self.STYLE.ERROR)
+		self.__appendOutputText(self.TB_HEADER, self.__STYLE.ERROR)
 		self.__appendOutputText('\n'.join(formattedTbList[1:]),
-			self.STYLE.ERROR)
+			self.__STYLE.ERROR)
 		for formattedExcLine in formattedExcList:
 			self.__appendOutputText(formattedExcLine,
-				self.STYLE.ERROR)
+				self.__STYLE.ERROR)
 
 
 	def writeStdout(self, outputText):
 		"""Print output sent to stdout from user code."""
-		self.__appendOutputText(outputText, self.STYLE.OUTPUT)
+		self.__appendOutputText(outputText, self.__STYLE.OUTPUT)
 
 
 	def writeStderr(self, outputText):
 		"""Print output sent to stderr from user code."""
-		self.__appendOutputText(outputText, self.STYLE.ERROR)
+		self.__appendOutputText(outputText, self.__STYLE.ERROR)
 
 
 	def __showCompletions(self, completionList):
 		self.__appendOutputText('%s\n' % completionList,
-			self.STYLE.CONTEXT)
+			self.__STYLE.CONTEXT)
 
 
 	def __appendOutputText(self, text, style):
+		# Save the relative scroll position.
+		out = self.__outputField
+		vbar = out.verticalScrollBar()
 
-		format = QtGui.QTextCharFormat()
-		if style == self.STYLE.OUTPUT:
-			color = self.palette().color(QtGui.QPalette.Text)
-		elif style == self.STYLE.CONTEXT:
-			color = self.palette().color(QtGui.QPalette.Disabled,
-				QtGui.QPalette.Text)
-		elif style == self.STYLE.ERROR:
-			color = Drawing.GetErrorColor()
-		format.setForeground(QtGui.QBrush(color))
+		vmin, vval, vmax = vbar.minimum(), vbar.value(), vbar.maximum()
+		nPages = (vmax-vmin)/float(vbar.pageStep())
+		origH = out.viewport().height() * nPages
+		if (vmax > vmin):
+			origF = float(vval-vmin)/(vmax-vmin)
+		else:
+			origF = 0
+		oldOffsetFromBottom = (1.0-origF)*origH
 
+		# Append formatted text.
+		format = self.__OUTPUT_FORMATS[style]
 		self.__outputField.moveCursor(QtGui.QTextCursor.End)
 		self.__outputField.textCursor().insertText(text, format)
 
+		# Restore the scroll position.
+		vmin, vmax = vbar.minimum(), vbar.maximum()
+		if vmax <= vmin:
+			return
+
+		nPages = (vmax-vmin)/float(vbar.pageStep())
+		newH = out.viewport().height() * nPages
+
+		if oldOffsetFromBottom < out.fontMetrics().lineSpacing():
+			# If within a line of the bottom, follow new text.
+			newOffsetFromTop = newH - oldOffsetFromBottom
+		else:
+			# Otherwise, stay at old location.
+			newOffsetFromTop = origH - oldOffsetFromBottom
+
+		newF = newOffsetFromTop/float(newH)
+		vval = newF*(vmax-vmin)
+		vbar.setValue(vval)
+
 
 	def writeSettings(self, settings):
-		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+		with Settings.GroupGuard(settings, self.__SETTINGS_GROUP_NAME):
 			Settings.WriteWidgetGeometry(settings,
-				self.SETTINGS_NAME_GEOMETRY, self)
-			settings.setValue(self.SETTINGS_NAME_SPLITTER,
+				self.__SETTINGS_NAME_GEOMETRY, self)
+			settings.setValue(self.__SETTINGS_NAME_SPLITTER,
 				QtCore.QVariant(self.__splitter.saveState()))
 			self.__inputField.writeSettings(settings)
 
 
 	def readSettings(self, settings):
-		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+		with Settings.GroupGuard(settings, self.__SETTINGS_GROUP_NAME):
 			Settings.ReadWidgetGeometry(settings,
-				self.SETTINGS_NAME_GEOMETRY, self)
+				self.__SETTINGS_NAME_GEOMETRY, self)
 			splitterSettings = settings.value(
-				self.SETTINGS_NAME_SPLITTER).toByteArray()
+				self.__SETTINGS_NAME_SPLITTER).toByteArray()
 			if not splitterSettings.isNull():
 				self.__splitter.restoreState(splitterSettings)
 			self.__inputField.readSettings(settings)
@@ -227,9 +275,9 @@ class PythonInputWidget(QtGui.QTextEdit):
 		execute		text (Python code to execute)
 		completions	list of possible completions
 	"""
-	SETTINGS_GROUP_NAME = 'PythonInputWidget'
-	SETTINGS_NAME_HISTORY = 'history'
-	SETTINGS_NAME_HISTORY_ENTRY = 'entry'
+	__SETTINGS_GROUP_NAME = 'PythonInputWidget'
+	__SETTINGS_NAME_HISTORY = 'history'
+	__SETTINGS_NAME_HISTORY_ENTRY = 'entry'
 	MAX_SAVED_HISTORY = 1023
 	def __init__(self, parent, locals):
 		QtGui.QTextEdit.__init__(self, parent)
@@ -447,25 +495,25 @@ class PythonInputWidget(QtGui.QTextEdit):
 
 
 	def readSettings(self, settings):
-		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+		with Settings.GroupGuard(settings, self.__SETTINGS_GROUP_NAME):
 			with Settings.ArrayReadGuard(settings,
-			self.SETTINGS_NAME_HISTORY) as n:
+			self.__SETTINGS_NAME_HISTORY) as n:
 				for i in xrange(n):
 					self.__readHistorySetting(settings, i)
 
 
 	def __readHistorySetting(self, settings, i):
 		settings.setArrayIndex(i)
-		qv = settings.value(self.SETTINGS_NAME_HISTORY_ENTRY)
+		qv = settings.value(self.__SETTINGS_NAME_HISTORY_ENTRY)
 		qstr = qv.toString()
 		if not qstr.isNull():
 			self.__commandHistory.append(str(qstr))
 
 
 	def writeSettings(self, settings):
-		with Settings.GroupGuard(settings, self.SETTINGS_GROUP_NAME):
+		with Settings.GroupGuard(settings, self.__SETTINGS_GROUP_NAME):
 			with Settings.ArrayWriteGuard(settings,
-			self.SETTINGS_NAME_HISTORY):
+			self.__SETTINGS_NAME_HISTORY):
 				history = self.__commandHistory[
 					-self.MAX_SAVED_HISTORY:]
 				for i, h in enumerate(history):
@@ -475,7 +523,7 @@ class PythonInputWidget(QtGui.QTextEdit):
 
 	def __writeHistorySetting(self, settings, i, historyEntry):
 		settings.setArrayIndex(i)
-		settings.setValue(self.SETTINGS_NAME_HISTORY_ENTRY,
+		settings.setValue(self.__SETTINGS_NAME_HISTORY_ENTRY,
 			QtCore.QVariant(QtCore.QVariant(historyEntry)))
 
 
