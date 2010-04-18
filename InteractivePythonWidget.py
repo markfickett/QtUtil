@@ -50,6 +50,11 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 		layout.setMargin(QtGui.QApplication.style()
 			.pixelMetric(QtGui.QStyle.PM_SplitterWidth))
 
+		self.__menuBar = QtGui.QMenuBar(self)
+		layout.addWidget(self.__menuBar)
+		viewMenu = self.__menuBar.addMenu('View')
+		viewMenu.addAction('History', self.__showHistory)
+
 		self.__splitter = QtGui.QSplitter(QtCore.Qt.Vertical, self)
 		layout.addWidget(self.__splitter)
 
@@ -184,42 +189,14 @@ class InteractivePythonWidget(QtGui.QWidget, code.InteractiveInterpreter):
 
 
 	def __appendOutputText(self, text, style):
-		# Save the relative scroll position.
-		out = self.__outputField
-		vbar = out.verticalScrollBar()
+		with ScrollKeepOrFollowGuard(self.__outputField):
+			format = self.__OUTPUT_FORMATS[style]
+			self.__outputField.moveCursor(QtGui.QTextCursor.End)
+			self.__outputField.textCursor().insertText(text, format)
 
-		vmin, vval, vmax = vbar.minimum(), vbar.value(), vbar.maximum()
-		nPages = (vmax-vmin)/float(vbar.pageStep())
-		origH = out.viewport().height() * nPages
-		if (vmax > vmin):
-			origF = float(vval-vmin)/(vmax-vmin)
-		else:
-			origF = 0
-		oldOffsetFromBottom = (1.0-origF)*origH
 
-		# Append formatted text.
-		format = self.__OUTPUT_FORMATS[style]
-		self.__outputField.moveCursor(QtGui.QTextCursor.End)
-		self.__outputField.textCursor().insertText(text, format)
-
-		# Restore the scroll position.
-		vmin, vmax = vbar.minimum(), vbar.maximum()
-		if vmax <= vmin:
-			return
-
-		nPages = (vmax-vmin)/float(vbar.pageStep())
-		newH = out.viewport().height() * nPages
-
-		if oldOffsetFromBottom < out.fontMetrics().lineSpacing():
-			# If within a line of the bottom, follow new text.
-			newOffsetFromTop = newH - oldOffsetFromBottom
-		else:
-			# Otherwise, stay at old location.
-			newOffsetFromTop = origH - oldOffsetFromBottom
-
-		newF = newOffsetFromTop/float(newH)
-		vval = newF*(vmax-vmin)
-		vbar.setValue(vval)
+	def __showHistory(self):
+		self.__inputField.showAllHistory()
 
 
 	def writeSettings(self, settings):
@@ -269,6 +246,54 @@ class StdRedirect(object):
 
 
 
+class ScrollKeepOrFollowGuard(object):
+	"""
+	When the scrolled area of a QAbstractScrollArea grows vertically,
+	either stay at the bottom or stay at the non-bottom position.
+	"""
+	def __init__(self, scrollArea):
+		self.__scrollArea = scrollArea
+
+
+	def __enter__(self):
+		# Save the relative scroll position.
+		vbar = self.__scrollArea.verticalScrollBar()
+
+		vmin, vval, vmax = vbar.minimum(), vbar.value(), vbar.maximum()
+		nPages = (vmax-vmin)/float(vbar.pageStep())
+		self.__origH = self.__scrollArea.viewport().height() * nPages
+		if (vmax > vmin):
+			origF = float(vval-vmin)/(vmax-vmin)
+		else:
+			origF = 0
+		self.__origEndOffset = (1.0-origF)*self.__origH
+
+
+	def __exit__(self, excType, excValue, tb):
+		# Restore the scroll position.
+		vbar = self.__scrollArea.verticalScrollBar()
+
+		vmin, vmax = vbar.minimum(), vbar.maximum()
+		if vmax <= vmin:
+			return
+
+		nPages = (vmax-vmin)/float(vbar.pageStep())
+		newH = self.__scrollArea.viewport().height() * nPages
+
+		lineSpacing = self.__scrollArea.fontMetrics().lineSpacing()
+		if self.__origEndOffset < lineSpacing:
+			# If within a line of the bottom, follow new text.
+			newTopOffset = newH - self.__origEndOffset
+		else:
+			# Otherwise, stay at old location.
+			newTopOffset = self.__origH - self.__origEndOffset
+
+		newF = newTopOffset/float(newH)
+		vval = newF*(vmax-vmin)
+		vbar.setValue(vval)
+
+
+
 class PythonInputWidget(QtGui.QTextEdit):
 	"""
 	Signals:
@@ -278,6 +303,7 @@ class PythonInputWidget(QtGui.QTextEdit):
 	__SETTINGS_GROUP_NAME = 'PythonInputWidget'
 	__SETTINGS_NAME_HISTORY = 'history'
 	__SETTINGS_NAME_HISTORY_ENTRY = 'entry'
+	__SETTINGS_NAME_HISTORY_GEOMETRY = 'historyView'
 	MAX_SAVED_HISTORY = 1023
 	def __init__(self, parent, locals):
 		QtGui.QTextEdit.__init__(self, parent)
@@ -288,6 +314,10 @@ class PythonInputWidget(QtGui.QTextEdit):
 		self.__completer = rlcompleter.Completer()
 		self.__completer.use_main_ns = False
 		self.__completer.namespace = locals
+
+		self.__historyView = QtGui.QTextEdit(None)
+		self.__historyView.setWindowTitle('Command History')
+		self.__historyView.setReadOnly(True)
 
 
 	def keyPressEvent(self, event):
@@ -363,6 +393,17 @@ class PythonInputWidget(QtGui.QTextEdit):
 		cursor.removeSelectedText()
 
 
+	def __appendCommandHistory(self, text):
+		if not self.__historyView.document().isEmpty():
+			self.__historyView.moveCursor(QtGui.QTextCursor.End)
+			historyText = '\n\n' + text
+		else:
+			historyText = text
+		with ScrollKeepOrFollowGuard(self.__historyView):
+			self.__historyView.insertPlainText(historyText)
+		self.__commandHistory.append(text)
+
+
 	def executionComplete(self):
 		"""
 		Execution has completed successfully.
@@ -374,7 +415,7 @@ class PythonInputWidget(QtGui.QTextEdit):
 
 		if not (self.__commandHistory
 		and self.__commandHistory[-1] == allText):
-			self.__commandHistory.append(allText)
+			self.__appendCommandHistory(allText)
 		self.__commandHistoryIndex = None
 
 
@@ -494,12 +535,27 @@ class PythonInputWidget(QtGui.QTextEdit):
 		self.moveCursor(QtGui.QTextCursor.End)
 
 
+	def showAllHistory(self):
+		baseFont = self.font()
+		# f = QtGui.QFont(baseFont) produces different (no) results.
+		f = QtGui.QFont()
+		f.setFixedPitch(baseFont.fixedPitch())
+		f.setPointSize(baseFont.pointSize())
+		f.setFamily(baseFont.family())
+		self.__historyView.setFont(f)
+
+		self.__historyView.show()
+
+
 	def readSettings(self, settings):
 		with Settings.GroupGuard(settings, self.__SETTINGS_GROUP_NAME):
 			with Settings.ArrayReadGuard(settings,
 			self.__SETTINGS_NAME_HISTORY) as n:
 				for i in xrange(n):
 					self.__readHistorySetting(settings, i)
+			Settings.ReadWidgetGeometry(settings,
+				self.__SETTINGS_NAME_HISTORY_GEOMETRY,
+				self.__historyView)
 
 
 	def __readHistorySetting(self, settings, i):
@@ -507,7 +563,7 @@ class PythonInputWidget(QtGui.QTextEdit):
 		qv = settings.value(self.__SETTINGS_NAME_HISTORY_ENTRY)
 		qstr = qv.toString()
 		if not qstr.isNull():
-			self.__commandHistory.append(str(qstr))
+			self.__appendCommandHistory(str(qstr))
 
 
 	def writeSettings(self, settings):
@@ -519,6 +575,9 @@ class PythonInputWidget(QtGui.QTextEdit):
 				for i, h in enumerate(history):
 					self.__writeHistorySetting(
 						settings, i, h)
+			Settings.WriteWidgetGeometry(settings,
+				self.__SETTINGS_NAME_HISTORY_GEOMETRY,
+				self.__historyView)
 
 
 	def __writeHistorySetting(self, settings, i, historyEntry):
