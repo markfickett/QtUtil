@@ -92,7 +92,7 @@ def ReadWidgetGeometry(settings, name, widget):
 		if not pos.isNull():
 			widget.move(pos)
 		size = settings.value(WIDGET_SIZE_NAME).toSize()
-		if not size.isNull():
+		if size.isValid() and not (size.isNull() or size.isEmpty()):
 			widget.resize(size)
 
 
