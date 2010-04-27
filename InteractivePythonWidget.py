@@ -409,13 +409,14 @@ class PythonInputWidget(QtGui.QTextEdit):
 		Execution has completed successfully.
 		Store history and clear as appropriate.
 		"""
-		allText = self.__getPlainText()
-		if not self.textCursor().hasSelection():
+		hasSelection = self.textCursor().hasSelection()
+		text = self.__getPlainText(selectionOnly=hasSelection)
+		if not hasSelection:
 			self.clear()
 
 		if not (self.__commandHistory
-		and self.__commandHistory[-1] == allText):
-			self.__appendCommandHistory(allText)
+		and self.__commandHistory[-1] == text):
+			self.__appendCommandHistory(text)
 		self.__commandHistoryIndex = None
 
 
