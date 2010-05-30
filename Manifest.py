@@ -6,6 +6,7 @@ from PyQt4 import QtCore, QtGui
 
 import code, traceback
 import enum
+import datetime
 
 from FamilyTree import logging, sys, rlcompleter, os
 
