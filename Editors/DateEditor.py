@@ -217,13 +217,14 @@ class DateEditor(QtGui.QWidget):
 		if d and (d != self.__date):
 			with Util.Undo.UndoGroupGuard() as g:
 				self.__updateForChanges = False
+				parts = []
 				try:
 					parts = _Assign(self.__date, d)
 				finally:
 					self.__updateForChanges = True
-			partsStr = Util.Language.List(parts)
-			g.setName('Set %s %s.' %
-				(self.__date.getName(), partsStr))
+				partsStr = Util.Language.List(parts)
+				g.setName('set %s %s' %
+					(self.__date.getName(), partsStr))
 		self.__updateField()
 		self.__updateLabel()
 

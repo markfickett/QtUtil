@@ -5,6 +5,7 @@ import ResourceManager
 import Editors
 
 from InteractivePythonWidget import *
+from UndoWidget import *
 
 from Manifest import os
 localDir = os.path.dirname(__file__)
