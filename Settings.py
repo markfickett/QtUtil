@@ -3,10 +3,6 @@ save UI settings
 """
 
 __all__ = [
-	'SetNames',
-	'SetIcon',
-	'GetSettings',
-
 	'GroupGuard',
 	'ArrayReadGuard',
 	'ArrayWriteGuard',
@@ -16,35 +12,9 @@ __all__ = [
 ]
 
 from Manifest import QtGui, QtCore, logging
-import ResourceManager
 
 log = logging.getLogger('Settings')
 
-
-global globalSettings
-globalSettings = None
-
-APPLICATION_ICON_NAME = 'ApplicationIcon.ico'
-
-
-def SetNames():
-	QtCore.QCoreApplication.setApplicationName('Family Tree')
-	QtCore.QCoreApplication.setOrganizationDomain('org.mfickett')
-	QtCore.QCoreApplication.setOrganizationName('MFickett')
-
-
-def SetIcon():
-	QtGui.QApplication.setWindowIcon(
-		ResourceManager.GetIcon(APPLICATION_ICON_NAME))
-
-
-def GetSettings():
-	global globalSettings
-	if not globalSettings:
-		globalSettings = QtCore.QSettings()
-		log.debug("using settings file '%s'"
-			% globalSettings.fileName())
-	return globalSettings
 
 
 class GroupGuard(object):
