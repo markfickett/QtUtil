@@ -8,7 +8,7 @@ import code, traceback
 import enum
 import datetime
 
-from FamilyTree import logging, sys, rlcompleter, os
+import logging, sys, rlcompleter, os
 
 if not hasattr(sys, 'ps1'):
         sys.ps1 = '>>> '
